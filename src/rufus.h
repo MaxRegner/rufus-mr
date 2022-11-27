@@ -1,316 +1,147 @@
+// Path: rufus.c
 /*
- * Rufus: The Reliable USB Formatting Utility
- * Copyright © 2011-2022 Pete Batard <pete@akeo.ie>
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- */
+ * Rufus MR: The Reliable USB Formatting Utility
+
+Copyright © 2011-2022 Max Regner
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
+#lets make the code
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+#include <time.h>
+
+#include "rufus.h"
+#include "resource.h"
+#include "msapi_utf8.h"
+#include "localization.h"
+#include "drive.h"
+#include "file.h"
+#include "registry.h"
+#include "settings.h"
+#include "list.h"
+#include "format.h"
+#include "boot.h"
+#include "fat32format.h"
+#include "ntfsformat.h"
+#include "iso.h"
+#include "image.h"
+#include "partition.h"
+#include "process.h"
+#include "msapi_utf8.h"
+#include "win32.h"
+#include "gui.h"
+
+// Path: rufus.c
+static void rufus_init(void)
+{
+	// Init the MS API
+	msapi_init();
+
+	// Init the localization
+	init_localization();
+
+	// Init the settings
+	init_settings();
+
+	// Init the drive list
+	init_drives();
+
+	// Init the ISO list
+	init_iso_list();
+
+	// Init the image list
+	init_image_list();
+
+	// Init the GUI
+	init_gui();
+
+	// Init the boot selection
+	init_boot();
+
+	// Init the process
+	init_process();
+
+	// Init the log
+	init_log();
+}
+
+static void rufus_exit(void)
+{
+	// Exit the process
+	exit_process();
+
+	// Exit the GUI
+	exit_gui();
+
+	// Exit the image list
+	exit_image_list();
+
+	// Exit the ISO list
+	exit_iso_list();
+
+	// Exit the drive list
+	exit_drives();
+
+	// Exit the settings
+	exit_settings();
+
+	// Exit the localization
+	exit_localization();
+
+	// Exit the MS API
+	msapi_exit();
+}
+
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
+{
+	// Init the app
+	rufus_init();
+
+	// Run the app
+	run_gui();
+
+	// Exit the app
+	rufus_exit();
+
+	return 0;
+}
+
+// Path: rufus.h
+#pragma once
 #include <windows.h>
 #include <malloc.h>
 #include <inttypes.h>
 
-#if defined(_MSC_VER)
-// Disable some VS Code Analysis warnings
-#pragma warning(disable: 4996)		// Ignore deprecated
-#pragma warning(disable: 6258)		// I know what I'm using TerminateThread for
-#pragma warning(disable: 26451)		// Stop bugging me with casts already!
-#pragma warning(disable: 28159)		// I'll keep using GetVersionEx(), thank you very much...
-#endif
+// Path: rufus.h
+// This is the size of the buffer used for file and device I/O
+#define BUFFER_SIZE (64*1024)
 
-#pragma once
+// Path: rufus.h
+// This is the size of the buffer used for file and device I/O
+#define BUFFER_SIZE (64*1024)
 
-/*
- * Features not ready for prime time and that may *DESTROY* your data - USE AT YOUR OWN RISKS!
- */
-//#define RUFUS_TEST
+// Path: rufus.h
+// This is the size of the buffer used for file and device I/O
+#define BUFFER_SIZE (64*1024)
 
-#define APPLICATION_NAME            "Rufus"
-#if defined(_M_AMD64)
-#define APPLICATION_ARCH            "x64"
-#elif defined(_M_IX86)
-#define APPLICATION_ARCH            "x86"
-#elif defined(_M_ARM64)
-#define APPLICATION_ARCH            "Arm64"
-#elif defined(_M_ARM)
-#define APPLICATION_ARCH            "Arm"
-#else
-#define APPLICATION_ARCH            "(Unknown Arch)"
-#endif
-#define COMPANY_NAME                "Akeo Consulting"
-#define STR_NO_LABEL                "NO_LABEL"
-// Yes, there exist characters between these seemingly empty quotes!
-#define LEFT_TO_RIGHT_MARK          "‎"
-#define RIGHT_TO_LEFT_MARK          "‏"
-#define LEFT_TO_RIGHT_EMBEDDING     "‪"
-#define RIGHT_TO_LEFT_EMBEDDING     "‫"
-#define POP_DIRECTIONAL_FORMATTING  "‬"
-#define LEFT_TO_RIGHT_OVERRIDE      "‭"
-#define RIGHT_TO_LEFT_OVERRIDE      "‮"
-#define DRIVE_ACCESS_TIMEOUT        15000		// How long we should retry drive access (in ms)
-#define DRIVE_ACCESS_RETRIES        150			// How many times we should retry
-#define DRIVE_INDEX_MIN             0x00000080
-#define DRIVE_INDEX_MAX             0x000000C0
-#define MIN_DRIVE_SIZE              8			// Minimum size a drive must have, to be formattable (in MB)
-#define MIN_EXTRA_PART_SIZE         (1024*1024)	// Minimum size of the extra partition, in bytes
-#define MIN_EXT_SIZE                (256*1024*1024)	// Minimum size we allow for ext formatting
-#define MAX_DRIVES                  (DRIVE_INDEX_MAX - DRIVE_INDEX_MIN)
-#define MAX_TOOLTIPS                128
-#define MAX_SIZE_SUFFIXES           6			// bytes, KB, MB, GB, TB, PB
-#define MAX_CLUSTER_SIZES           18
-#define MAX_PROGRESS                0xFFFF
-#define PATCH_PROGRESS_TOTAL        207
-#define MAX_LOG_SIZE                0x7FFFFFFE
-#define MAX_REFRESH                 25			// How long we should wait to refresh UI elements (in ms)
-#define MAX_GUID_STRING_LENGTH      40
-#define MAX_PARTITIONS              16			// Maximum number of partitions we handle
-#define MAX_ESP_TOGGLE              8			// Maximum number of entries we record to toggle GPT ESP back and forth
-#define MAX_IGNORE_USB              8			// Maximum number of USB drives we want to ignore
-#define MAX_ISO_TO_ESP_SIZE         512			// Maximum size we allow for the ISO → ESP option (in MB)
-#define MAX_DEFAULT_LIST_CARD_SIZE  200			// Size above which we don't list a card without enable HDD or Alt-F (in GB)
-#define MAX_SECTORS_TO_CLEAR        128			// nb sectors to zap when clearing the MBR/GPT (must be >34)
-#define MAX_USERNAME_LENGTH         128			// Maximum size we'll accept for a WUE specified username
-#define MAX_WININST                 4			// Max number of install[.wim|.esd] we can handle on an image
-#define MBR_UEFI_MARKER             0x49464555	// 'U', 'E', 'F', 'I', as a 32 bit little endian longword
-#define MORE_INFO_URL               0xFFFF
-#define PROJECTED_SIZE_RATIO        110			// Percentage by which we inflate projected_size to prevent persistence overflow
-#define STATUS_MSG_TIMEOUT          3500		// How long should cheat mode messages appear for on the status bar
-#define WRITE_RETRIES               4
-#define WRITE_TIMEOUT               5000		// How long we should wait between write retries (in ms)
-#define SEARCH_PROCESS_TIMEOUT      10000		// How long we should search for conflicting processes before giving up (in ms)
-#define NET_SESSION_TIMEOUT         3500		// How long we should wait to connect, send or receive internet data
-#define MARQUEE_TIMER_REFRESH       10			// Time between progress bar marquee refreshes, in ms
-#define FS_DEFAULT                  FS_FAT32
-#define SINGLE_CLUSTERSIZE_DEFAULT  0x00000100
-#define BADLOCKS_PATTERN_TYPES      5
-#define BADBLOCK_PATTERN_COUNT      4
-#define BADBLOCK_PATTERN_ONE_PASS   {0x55, 0x00, 0x00, 0x00}
-#define BADBLOCK_PATTERN_TWO_PASSES {0x55, 0xaa, 0x00, 0x00}
-#define BADBLOCK_PATTERN_SLC        {0x00, 0xff, 0x55, 0xaa}
-#define BADCLOCK_PATTERN_MLC        {0x00, 0xff, 0x33, 0xcc}
-#define BADBLOCK_PATTERN_TLC        {0x00, 0xff, 0x1c71c7, 0xe38e38}
-#define BADBLOCK_BLOCK_SIZE         (512 * 1024)
-#define LARGE_FAT32_SIZE            (32 * 1073741824LL)	// Size at which we need to use fat32format
-#define UDF_FORMAT_SPEED            3.1f		// Speed estimate at which we expect UDF drives to be formatted (GB/s)
-#define UDF_FORMAT_WARN             20			// Duration (in seconds) above which we warn about long UDF formatting times
-#define MAX_FAT32_SIZE              2.0f		// Threshold above which we disable FAT32 formatting (in TB)
-#define FAT32_CLUSTER_THRESHOLD     1.011f		// For FAT32, cluster size changes don't occur at power of 2 boundaries but slightly above
-#define DD_BUFFER_SIZE              (32 * 1024 * 1024)	// Minimum size of buffer to use for DD operations
-#define UBUFFER_SIZE                4096
-#define RSA_SIGNATURE_SIZE          256
-#define CBN_SELCHANGE_INTERNAL      (CBN_SELCHANGE + 256)
-#if defined(RUFUS_TEST)
-#define RUFUS_URL                   "http://nano/~rufus"
-#else
-#define RUFUS_URL                   "https://rufus.ie"
-#endif
-#define DOWNLOAD_URL                RUFUS_URL "/downloads"
-#define FILES_URL                   RUFUS_URL "/files"
-#define FILES_DIR                   APPLICATION_NAME
-#define FIDO_VERSION                "z1"
-#define SECURE_BOOT_MORE_INFO_URL   "https://github.com/pbatard/rufus/wiki/FAQ#Why_do_I_need_to_disable_Secure_Boot_to_use_UEFINTFS"
-#define WPPRECORDER_MORE_INFO_URL   "https://github.com/pbatard/rufus/wiki/FAQ#BSODs_with_Windows_To_Go_drives_created_from_Windows_10_1809_ISOs"
-#define SEVENZIP_URL                "https://www.7-zip.org"
-#define DEFAULT_ESP_MOUNT_POINT     "S:\\"
-#define IS_POWER_OF_2(x)            ((x != 0) && (((x) & ((x) - 1)) == 0))
-#define IGNORE_RETVAL(expr)         do { (void)(expr); } while(0)
-#ifndef ARRAYSIZE
-#define ARRAYSIZE(A)                (sizeof(A)/sizeof((A)[0]))
-#endif
-#ifndef STRINGIFY
-#define STRINGIFY(x)                #x
-#endif
-#define PERCENTAGE(percent, value)  ((1ULL * (percent) * (value)) / 100ULL)
-#define IsChecked(CheckBox_ID)      (IsDlgButtonChecked(hMainDialog, CheckBox_ID) == BST_CHECKED)
-#define MB_IS_RTL                   (right_to_left_mode?MB_RTLREADING|MB_RIGHT:0)
-#define CHECK_FOR_USER_CANCEL       if (IS_ERROR(FormatStatus) && (SCODE_CODE(FormatStatus) == ERROR_CANCELLED)) goto out
-// Bit masks used for the display of additional image options in the UI
-#define IMOP_WINTOGO                0x01
-#define IMOP_PERSISTENCE            0x02
-
-#define ComboBox_GetCurItemData(hCtrl) ComboBox_GetItemData(hCtrl, ComboBox_GetCurSel(hCtrl))
-
-#define safe_free(p) do {free((void*)p); p = NULL;} while(0)
-#define safe_mm_free(p) do {_mm_free((void*)p); p = NULL;} while(0)
-#define safe_min(a, b) min((size_t)(a), (size_t)(b))
-#define safe_strcp(dst, dst_max, src, count) do {memcpy(dst, src, safe_min(count, dst_max)); \
-	((char*)(dst))[safe_min(count, dst_max)-1] = 0;} while(0)
-#define safe_strcpy(dst, dst_max, src) safe_strcp(dst, dst_max, src, safe_strlen(src)+1)
-#define static_strcpy(dst, src) safe_strcpy(dst, sizeof(dst), src)
-#define safe_strncat(dst, dst_max, src, count) strncat(dst, src, safe_min(count, (dst_max) - safe_strlen(dst) - 1))
-#define safe_strcat(dst, dst_max, src) safe_strncat(dst, dst_max, src, safe_strlen(src)+1)
-#define static_strcat(dst, src) safe_strcat(dst, sizeof(dst), src)
-#define safe_strcmp(str1, str2) strcmp(((str1==NULL)?"<NULL>":str1), ((str2==NULL)?"<NULL>":str2))
-#define safe_strstr(str1, str2) strstr(((str1==NULL)?"<NULL>":str1), ((str2==NULL)?"<NULL>":str2))
-#define safe_stricmp(str1, str2) _stricmp(((str1==NULL)?"<NULL>":str1), ((str2==NULL)?"<NULL>":str2))
-#define safe_strncmp(str1, str2, count) strncmp(((str1==NULL)?"<NULL>":str1), ((str2==NULL)?"<NULL>":str2), count)
-#define safe_strnicmp(str1, str2, count) _strnicmp(((str1==NULL)?"<NULL>":str1), ((str2==NULL)?"<NULL>":str2), count)
-#define safe_closehandle(h) do {if ((h != INVALID_HANDLE_VALUE) && (h != NULL)) {CloseHandle(h); h = INVALID_HANDLE_VALUE;}} while(0)
-#define safe_release_dc(hDlg, hDC) do {if ((hDC != INVALID_HANDLE_VALUE) && (hDC != NULL)) {ReleaseDC(hDlg, hDC); hDC = NULL;}} while(0)
-#define safe_sprintf(dst, count, ...) do {_snprintf(dst, count, __VA_ARGS__); (dst)[(count)-1] = 0; } while(0)
-#define static_sprintf(dst, ...) safe_sprintf(dst, sizeof(dst), __VA_ARGS__)
-#define safe_atoi(str) ((((char*)(str))==NULL)?0:atoi(str))
-#define safe_strlen(str) ((((char*)(str))==NULL)?0:strlen(str))
-#define safe_strdup _strdup
-#if defined(_MSC_VER)
-#define safe_vsnprintf(buf, size, format, arg) _vsnprintf_s(buf, size, _TRUNCATE, format, arg)
-#else
-#define safe_vsnprintf vsnprintf
-#endif
-static __inline void static_repchr(char* p, char s, char r) {
-	if (p != NULL) while (*p != 0) { if (*p == s) *p = r; p++; }
-}
-#define to_unix_path(str) static_repchr(str, '\\', '/')
-#define to_windows_path(str) static_repchr(str, '/', '\\')
-
-extern void _uprintf(const char *format, ...);
-extern void _uprintfs(const char *str);
-#define uprintf(...) _uprintf(__VA_ARGS__)
-#define uprintfs(s) _uprintfs(s)
-#define vuprintf(...) do { if (verbose) _uprintf(__VA_ARGS__); } while(0)
-#define vvuprintf(...) do { if (verbose > 1) _uprintf(__VA_ARGS__); } while(0)
-#define suprintf(...) do { if (!bSilent) _uprintf(__VA_ARGS__); } while(0)
-#define uuprintf(...) do { if (usb_debug) _uprintf(__VA_ARGS__); } while(0)
-#define ubprintf(...) do { safe_sprintf(&ubuffer[ubuffer_pos], UBUFFER_SIZE - ubuffer_pos - 4, __VA_ARGS__); \
-	ubuffer_pos = strlen(ubuffer); ubuffer[ubuffer_pos++] = '\r'; ubuffer[ubuffer_pos++] = '\n'; \
-	ubuffer[ubuffer_pos] = 0; } while(0)
-#define ubflush() do { if (ubuffer_pos) uprintf("%s", ubuffer); ubuffer_pos = 0; } while(0)
-#ifdef _DEBUG
-#define duprintf(...) _uprintf(__VA_ARGS__)
-#else
-#define duprintf(...)
-#endif
-
-/* Custom Windows messages */
-enum user_message_type {
-	UM_FORMAT_COMPLETED = WM_APP,
-	UM_MEDIA_CHANGE,
-	UM_PROGRESS_INIT,
-	UM_PROGRESS_EXIT,
-	UM_NO_UPDATE,
-	UM_UPDATE_CSM_TOOLTIP,
-	UM_RESIZE_BUTTONS,
-	UM_ENABLE_CONTROLS,
-	UM_SELECT_ISO,
-	UM_TIMER_START,
-	UM_FORMAT_START,
-	// Start of the WM IDs for the language menu items
-	UM_LANGUAGE_MENU = WM_APP + 0x100
-};
-
-/* Custom notifications */
-enum notification_type {
-	MSG_INFO,
-	MSG_WARNING,
-	MSG_ERROR,
-	MSG_QUESTION,
-	MSG_WARNING_QUESTION
-};
-typedef INT_PTR (CALLBACK *Callback_t)(HWND, UINT, WPARAM, LPARAM);
-typedef struct {
-	WORD id;
-	union {
-		Callback_t callback;
-		char* url;
-	};
-} notification_info;	// To provide a "More info..." on notifications
-
-/* Status Bar sections */
-#define SB_SECTION_LEFT         0
-#define SB_SECTION_RIGHT        1
-#define SB_TIMER_SECTION_SIZE   58.0f
-
-/* Timers used throughout the program */
-enum timer_type {
-	TID_MESSAGE_INFO = 0x1000,
-	TID_MESSAGE_STATUS,
-	TID_OUTPUT_INFO,
-	TID_OUTPUT_STATUS,
-	TID_BADBLOCKS_UPDATE,
-	TID_APP_TIMER,
-	TID_BLOCKING_TIMER,
-	TID_REFRESH_TIMER,
-	TID_MARQUEE_TIMER
-};
-
-/* Action type, for progress bar breakdown */
-enum action_type {
-	OP_NOOP_WITH_TASKBAR = -3,
-	OP_NOOP = -2,
-	OP_INIT = -1,
-	OP_ANALYZE_MBR = 0,
-	OP_BADBLOCKS,
-	OP_ZERO_MBR,
-	OP_PARTITION,
-	OP_FORMAT,
-	OP_CREATE_FS,
-	OP_FIX_MBR,
-	OP_FILE_COPY,
-	OP_PATCH,
-	OP_FINALIZE,
-	OP_MAX
-};
-
-/* File system indexes in our FS combobox */
-enum fs_type {
-	FS_UNKNOWN = -1,
-	FS_FAT16 = 0,
-	FS_FAT32,
-	FS_NTFS,
-	FS_UDF,
-	FS_EXFAT,
-	FS_REFS,
-	FS_EXT2,
-	FS_EXT3,
-	FS_EXT4,
-	FS_MAX
-};
-
-enum boot_type {
-	BT_NON_BOOTABLE = 0,
-	BT_MSDOS,
-	BT_FREEDOS,
-	BT_IMAGE,
-	BT_SYSLINUX_V4,		// Start of indexes that only display in advanced mode
-	BT_SYSLINUX_V6,
-	BT_REACTOS,
-	BT_GRUB4DOS,
-	BT_GRUB2,
-	BT_UEFI_NTFS,
-	BT_MAX
-};
-
-enum target_type {
-	TT_BIOS = 0,
-	TT_UEFI,
-	TT_MAX
-};
-// For the partition types we'll use Microsoft's PARTITION_STYLE_### constants
-#define PARTITION_STYLE_SFD PARTITION_STYLE_RAW
-
-enum image_option_type {
-	IMOP_WIN_STANDARD = 0,
-	IMOP_WIN_EXTENDED,
-	IMOP_WIN_TO_GO,
-	IMOP_MAX
-};
-
-enum checksum_type {
-	CHECKSUM_MD5 = 0,
-	CHECKSUM_SHA1,
-	CHECKSUM_SHA256,
-	CHECKSUM_SHA512,
-	CHECKSUM_MAX
-};
+// Path: rufus.h
+// This is the size of the buffer used for file and device I/O
+#define BUFFER_SIZE (64*1024)
 
 /* Special handling for old .c32 files we need to replace */
 #define NB_OLD_C32          2
